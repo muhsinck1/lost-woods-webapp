@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import mapboxgl from 'mapbox-gl'
 import { useAppStore } from '@/lib/store/useAppStore'
 import { normalizeFeatureProps } from '@/lib/spatial/normalizeData'
+import { TRAIL_META } from '@/lib/trailMeta'
 import { Home } from 'lucide-react'
 
 // Using a free public token — replace with your own for production
@@ -37,36 +38,6 @@ const TRAIL_STYLES: Record<string, { color: string; width: number; dash?: number
   reihan: { color: '#f59e0b', width: 3, dash: [6, 3] },
 }
 
-// Per-trail metadata used when populating the TrailPanel
-const TRAIL_META: Record<string, {
-  name: string; difficulty: string; distance: string;
-  duration: string; note: string; habitats: string[]
-}> = {
-  burley: {
-    name: 'Henfield Trail',
-    difficulty: 'Moderate',
-    distance: '7.6 km',
-    duration: '2h 30m',
-    note: 'Passes ancient oak hedgerows, wetland margins and open farmland edging Sussex deciduous woodland.',
-    habitats: ['Deciduous Woodland', 'Wetland Margin', 'Lowland Meadow'],
-  },
-  emery: {
-    name: "Butcher's Wood Trail",
-    difficulty: 'Moderate–Challenging',
-    distance: '9.5 km',
-    duration: '3h 00m',
-    note: 'Winds through veteran trees and fungi-rich woodland floor from Danny House to the Hurstpierpoint Folly Tower.',
-    habitats: ['Ancient Woodland', 'Wood Pasture', 'Hedgerow'],
-  },
-  reihan: {
-    name: 'Tottington Trail',
-    difficulty: 'Easy–Moderate',
-    distance: '5.4 km',
-    duration: '2h 00m',
-    note: 'Varied route across grassy fields into ancient woodland — ideal for birdwatching with open South Downs views.',
-    habitats: ['Lowland Grassland', 'Ancient Woodland', 'Valley Bog'],
-  },
-}
 
 const SPECIES_STYLES: Record<string, { color: string; icon: string }> = {
   birds:  { color: '#38bdf8', icon: 'icon-bird' }, // Cyan / Sky blue
@@ -671,19 +642,31 @@ export default function MapCore({
             'line-opacity':   0.9,
           },
         })
-        map.on('mouseenter', `${key}-line`, () => {
+        // ── Wide invisible hit-target layer (20 px) ──────────────────────
+        // This makes trails finger-tappable on mobile — the visual line is
+        // only 3px wide which is impossible to reliably tap on a touchscreen.
+        map.addLayer({
+          id: `${key}-hit`,
+          type: 'line',
+          source: key,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-width': 20, 'line-opacity': 0 },
+        })
+
+        // Hover feedback wired to hit layer (catches both mouse + touch-hover)
+        map.on('mouseenter', `${key}-hit`, () => {
           map.setPaintProperty(`${key}-line`, 'line-width', style.width + 2)
           map.setPaintProperty(`${key}-glow`, 'line-opacity', 0.35)
           map.getCanvas().style.cursor = 'pointer'
         })
-        map.on('mouseleave', `${key}-line`, () => {
+        map.on('mouseleave', `${key}-hit`, () => {
           map.setPaintProperty(`${key}-line`, 'line-width', style.width)
           map.setPaintProperty(`${key}-glow`, 'line-opacity', 0.12)
           map.getCanvas().style.cursor = ''
         })
-        // Click trail line → open TrailPanel + fly map to show full trail
-        map.on('click', `${key}-line`, (e) => {
-          e.preventDefault()
+
+        // Click/tap handler on hit layer — works on desktop AND mobile
+        map.on('click', `${key}-hit`, (e) => {
           popup.remove()
           const meta = TRAIL_META[key]
           useAppStore.getState().setSelectedFeature(null)

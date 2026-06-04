@@ -19,7 +19,16 @@ const TRAIL_DATA_PATHS: Record<string, string> = {
 
 // ── Types ────────────────────────────────────────────────────────────
 interface ElevPoint   { dist: number; elev: number }
-interface SpeciesItem { name: string; sciName: string }
+interface SpeciesItem {
+  name: string
+  sciName: string
+  imageUrl?: string
+  url?: string
+  date?: string
+  place?: string
+  taxonGroup?: string
+  qualityGrade?: string
+}
 
 // ── Geometry helpers ─────────────────────────────────────────────────
 function haversineKm(a: number[], b: number[]): number {
@@ -97,11 +106,20 @@ async function fetchSpeciesNearTrail(
       if (!c || feat.geometry.type !== 'Point') continue
       const [lon, lat] = c
       if (lon < bbox.minLon || lon > bbox.maxLon || lat < bbox.minLat || lat > bbox.maxLat) continue
-      const name    = feat.properties?.common_name || feat.properties?.name || ''
-      const sciName = feat.properties?.scientific_name || ''
+      const p = feat.properties ?? {}
+      const name = p.common_name || p.name || ''
       if (name && !seen.has(name)) {
         seen.add(name)
-        out.push({ name, sciName })
+        out.push({
+          name,
+          sciName:      p.scientific_name || '',
+          imageUrl:     p.image_url       || undefined,
+          url:          p.url             || undefined,
+          date:         p.observed_on ? new Date(typeof p.observed_on === 'number' ? p.observed_on : p.observed_on).toLocaleDateString('en-GB', { year:'numeric', month:'short', day:'numeric' }) : undefined,
+          place:        p.place_guess    || undefined,
+          taxonGroup:   kind,
+          qualityGrade: p.quality_grade  || undefined,
+        })
         if (out.length >= 12) break
       }
     }
@@ -114,11 +132,12 @@ export default function TrailPanel() {
   const activePanel    = useAppStore(s => s.activePanel)
   const setPanel       = useAppStore(s => s.setActivePanel)
   const selectedTrail  = useAppStore(s => s.selectedTrail)
-  const liveSession      = useAppStore(s => s.liveSession)
-  const startLive        = useAppStore(s => s.startLive)
-  const startLiveAtStart = useAppStore(s => s.startLiveAtStart)
-  const stopLive         = useAppStore(s => s.stopLive)
-  const setLiveStatus    = useAppStore(s => s.setLiveStatus)
+  const liveSession        = useAppStore(s => s.liveSession)
+  const startLive          = useAppStore(s => s.startLive)
+  const startLiveAtStart   = useAppStore(s => s.startLiveAtStart)
+  const stopLive           = useAppStore(s => s.stopLive)
+  const setLiveStatus      = useAppStore(s => s.setLiveStatus)
+  const setSelectedFeature = useAppStore(s => s.setSelectedFeature)
 
   // Elevation + species
   const [elevPts,       setElevPts]       = useState<ElevPoint[]>([])
@@ -557,19 +576,22 @@ export default function TrailPanel() {
 
               <SpeciesSection emoji="🐦" label="Birds"  accentColor="#4cde8f"
                 icon={<Bird size={12} />} items={birds}  loading={loadingSpec}
-                emptyMsg="No bird records matched near this trail" />
+                emptyMsg="No bird records matched near this trail"
+                onSelect={setSelectedFeature} />
 
               <div className="h-px bg-white/5" />
 
               <SpeciesSection emoji="🌿" label="Plants" accentColor="#22d3ee"
                 icon={<Leaf size={12} />} items={plants} loading={loadingSpec}
-                emptyMsg="No plant records matched near this trail" />
+                emptyMsg="No plant records matched near this trail"
+                onSelect={setSelectedFeature} />
 
               <div className="h-px bg-white/5" />
 
               <SpeciesSection emoji="🍄" label="Fungi"  accentColor="#c084fc"
                 icon={<span style={{ fontSize: 12 }}>🍄</span>} items={fungi} loading={loadingSpec}
-                emptyMsg="No fungi records matched near this trail" />
+                emptyMsg="No fungi records matched near this trail"
+                onSelect={setSelectedFeature} />
 
               {/* Trail note */}
               {trail.note && (
@@ -731,9 +753,10 @@ function ElevStat({ label, icon, value, green, style: extraStyle }: {
   )
 }
 
-function SpeciesSection({ emoji, label, accentColor, icon, items, loading, emptyMsg }: {
+function SpeciesSection({ emoji, label, accentColor, icon, items, loading, emptyMsg, onSelect }: {
   emoji: string; label: string; accentColor: string; icon: React.ReactNode
   items: SpeciesItem[]; loading: boolean; emptyMsg: string
+  onSelect?: (f: any) => void
 }) {
   return (
     <div>
@@ -757,11 +780,31 @@ function SpeciesSection({ emoji, label, accentColor, icon, items, loading, empty
       ) : items.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {items.slice(0, 9).map(sp => (
-            <span key={sp.name} title={sp.sciName || undefined}
-              className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-nature-text leading-none"
-              style={{ background: `${accentColor}12`, border: `1px solid ${accentColor}28` }}>
+            <button
+              key={sp.name}
+              title={sp.sciName || undefined}
+              onClick={() => onSelect?.({
+                id:                 sp.url ?? sp.name,
+                commonName:         sp.name,
+                scientificName:     sp.sciName,
+                taxonGroup:         sp.taxonGroup ?? label.toLowerCase(),
+                recorder:           'iNaturalist',
+                date:               sp.date ?? 'Unknown Date',
+                habitat:            sp.place ?? 'West Sussex',
+                conservationStatus: sp.qualityGrade ?? 'Research Grade',
+                gridRef:            '',
+                inatUrl:            sp.url,
+                imageUrl:           sp.imageUrl,
+              })}
+              className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-nature-text leading-none transition-all active:scale-95 hover:brightness-110"
+              style={{
+                background: `${accentColor}12`,
+                border: `1px solid ${accentColor}28`,
+                cursor: onSelect ? 'pointer' : 'default',
+              }}
+            >
               {sp.name}
-            </span>
+            </button>
           ))}
         </div>
       ) : (

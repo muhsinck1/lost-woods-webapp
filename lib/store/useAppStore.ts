@@ -156,10 +156,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelectedFeature: (feature) => {
     set({ selectedFeature: feature })
     if (feature) {
+      // Opening a feature: show info panel (but don't disturb layers panel)
       if (get().activePanel !== 'layers') set({ activePanel: 'info' })
     } else {
-      if (get().activePanel === 'info') set({ activePanel: null })
-      if (get().activePanel === 'trail') set({ activePanel: null })
+      // Closing a feature: if trail panel was underneath, restore it
+      if (get().activePanel === 'info') {
+        const panel = get().selectedTrail ? 'trail' : null
+        set({ activePanel: panel })
+      }
+      // NOTE: never clear 'trail' panel here — trail panel manages itself
     }
   },
 

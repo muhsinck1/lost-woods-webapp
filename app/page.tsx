@@ -14,6 +14,7 @@ import FloatingHeader from '@/components/ui/FloatingHeader'
 import LoadingScreen from '@/components/ui/LoadingScreen'
 import SearchBar from '@/components/ui/SearchBar'
 import TrailPanel from '@/components/ui/TrailPanel'
+import TrailsListPanel from '@/components/ui/TrailsListPanel'
 import WelcomeScreen from '@/components/ui/WelcomeScreen'
 import CameraPanel from '@/components/ui/CameraPanel'
 import HabitatCard from '@/components/ui/HabitatCard'
@@ -69,6 +70,9 @@ export default function HomePage() {
 
           {/* Search bar overlay */}
           <SearchBar />
+
+          {/* Trails list — shown when activeView = 'trails' */}
+          <TrailsListPanel />
 
           {/* Trail details panel */}
           <TrailPanel />

@@ -1,7 +1,7 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, MapPin, Calendar, User, Trees, Star, Bug, Leaf, ExternalLink, Camera } from 'lucide-react'
+import { ArrowLeft, MapPin, Calendar, User, Trees, Star, Bug, Leaf, ExternalLink, Camera } from 'lucide-react'
 import { useAppStore } from '@/lib/store/useAppStore'
 
 const TAXON_INFO: Record<string, { color: string, icon: any, label: string }> = {
@@ -11,9 +11,16 @@ const TAXON_INFO: Record<string, { color: string, icon: any, label: string }> = 
 }
 
 export default function InfoPanel() {
-  const selectedObj = useAppStore(s => s.selectedFeature)
+  const selectedObj    = useAppStore(s => s.selectedFeature)
+  const selectedTrail  = useAppStore(s => s.selectedTrail)
+  const setActivePanel = useAppStore(s => s.setActivePanel)
   const feature = selectedObj
-  const onClose = () => useAppStore.getState().setSelectedFeature(null)
+
+  const onClose = () => {
+    useAppStore.getState().setSelectedFeature(null)
+    // If the trail panel was open when species was tapped, go back to it
+    if (selectedTrail) setActivePanel('trail')
+  }
 
   if (!feature) return null
 
@@ -63,9 +70,23 @@ export default function InfoPanel() {
                 <div className="w-10 h-1 rounded-full bg-white/20" />
               </div>
 
+              {/* ← Back button row */}
+              <div className="px-4 pt-4 pb-2">
+                <button
+                  onClick={onClose}
+                  className="flex items-center gap-1.5 text-nature-muted hover:text-white transition-colors min-h-[44px] -ml-1 px-1 rounded-xl"
+                  aria-label="Back"
+                >
+                  <ArrowLeft size={16} />
+                  <span className="text-[12px] font-semibold tracking-wide">
+                    {selectedTrail ? `Back to ${selectedTrail.name ?? 'Trail'}` : 'Back'}
+                  </span>
+                </button>
+              </div>
+
               {/* Header */}
               <div
-                className="flex items-start justify-between px-5 pt-4 pb-3"
+                className="flex items-start px-5 pt-1 pb-3"
                 style={{ borderBottom: '1px solid var(--border)' }}
               >
                 <div className="flex-1 min-w-0">
@@ -85,13 +106,6 @@ export default function InfoPanel() {
                     {feature.scientificName}
                   </p>
                 </div>
-                <button
-                  onClick={onClose}
-                  className="p-1.5 rounded-xl text-nature-muted hover:text-nature-text hover:bg-white/5 transition-colors"
-                  aria-label="Close"
-                >
-                  <X size={16} />
-                </button>
               </div>
 
               {/* Detail grid */}
