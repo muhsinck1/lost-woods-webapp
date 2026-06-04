@@ -129,9 +129,9 @@ async function fetchSpeciesNearTrail(
 
 // ── Main component ────────────────────────────────────────────────────
 export default function TrailPanel() {
-  const activePanel    = useAppStore(s => s.activePanel)
-  const setPanel       = useAppStore(s => s.setActivePanel)
-  const selectedTrail  = useAppStore(s => s.selectedTrail)
+  const activePanel        = useAppStore(s => s.activePanel)
+  const setPanel           = useAppStore(s => s.setActivePanel)
+  const selectedTrail      = useAppStore(s => s.selectedTrail)
   const liveSession        = useAppStore(s => s.liveSession)
   const startLive          = useAppStore(s => s.startLive)
   const startLiveAtStart   = useAppStore(s => s.startLiveAtStart)
@@ -140,17 +140,32 @@ export default function TrailPanel() {
   const setSelectedFeature = useAppStore(s => s.setSelectedFeature)
 
   // Elevation + species
-  const [elevPts,       setElevPts]       = useState<ElevPoint[]>([])
-  const [birds,         setBirds]         = useState<SpeciesItem[]>([])
-  const [plants,        setPlants]        = useState<SpeciesItem[]>([])
-  const [fungi,         setFungi]         = useState<SpeciesItem[]>([])
-  const [loadingElev,   setLoadingElev]   = useState(false)
-  const [loadingSpec,   setLoadingSpec]   = useState(false)
-  const [elevError,     setElevError]     = useState(false)
+  const [elevPts,        setElevPts]        = useState<ElevPoint[]>([])
+  const [birds,          setBirds]          = useState<SpeciesItem[]>([])
+  const [plants,         setPlants]         = useState<SpeciesItem[]>([])
+  const [fungi,          setFungi]          = useState<SpeciesItem[]>([])
+  const [loadingElev,    setLoadingElev]    = useState(false)
+  const [loadingSpec,    setLoadingSpec]    = useState(false)
+  const [elevError,      setElevError]      = useState(false)
   const [showStartModal, setShowStartModal] = useState(false)
 
-  // Trail coords kept in state so GPS effects can read them
+  // Trail coords for GPS
   const [trailCoords, setTrailCoords] = useState<number[][] | null>(null)
+
+  // Bottom-sheet state — mobile only
+  // collapsed = true  → 44vh (map visible above)
+  // collapsed = false → 88vh (full detail view)
+  const [collapsed,  setCollapsed]  = useState(true)
+  // Detect mobile after mount (SSR-safe)
+  const [isMobile,   setIsMobile]   = useState(false)
+  const touchStartY  = useRef<number>(0)
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   const abortRef = useRef<AbortController | null>(null)
 
@@ -160,7 +175,9 @@ export default function TrailPanel() {
     if (!key || !TRAIL_DATA_PATHS[key]) return
 
     setElevPts([]); setBirds([]); setPlants([]); setFungi([]); setTrailCoords(null)
-    setElevError(false); setLoadingElev(true); setLoadingSpec(true); setShowStartModal(false)
+    setElevError(false); setLoadingElev(true); setLoadingSpec(true)
+    setShowStartModal(false)
+    setCollapsed(true)  // always start collapsed on mobile
 
     abortRef.current?.abort()
     abortRef.current = new AbortController()
@@ -203,7 +220,7 @@ export default function TrailPanel() {
     return () => abortRef.current?.abort()
   }, [selectedTrail?.trailKey])
 
-  // ── PROXIMITY CHECK — fires when status = 'locating' + coords ready ─
+  // ── PROXIMITY CHECK — fires when status = 'locating' ────────────
   useEffect(() => {
     if (!liveSession || liveSession.status !== 'locating') return
     if (!trailCoords || !trailCoords.length) return
@@ -211,9 +228,7 @@ export default function TrailPanel() {
     const trailStart = trailCoords[0] as [number, number]
 
     if (!navigator?.geolocation) {
-      // No GPS support — jump straight to tracking
-      setLiveStatus('tracking', { trailStart })
-      return
+      setLiveStatus('tracking', { trailStart }); return
     }
 
     navigator.geolocation.getCurrentPosition(
@@ -221,36 +236,27 @@ export default function TrailPanel() {
         const userPos: [number, number] = [pos.coords.longitude, pos.coords.latitude]
         const dist = haversineKm(userPos, trailStart)
         if (dist <= 0.2) {
-          // Within 200 m — start tracking immediately
           setLiveStatus('tracking', { trailStart })
         } else {
-          // Too far — show navigate-to-start state
           setLiveStatus('far', { distToStartKm: dist, trailStart })
         }
       },
-      () => {
-        // GPS denied or timed out — start tracking anyway
-        setLiveStatus('tracking', { trailStart })
-      },
+      () => setLiveStatus('tracking', { trailStart }),
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }
     )
   }, [liveSession?.status, trailCoords])
 
-  // ── AUTO-START POLLING — fires when status = 'far', polls every 5 s ─
+  // ── AUTO-START POLLING when 'far' ────────────────────────────────
   useEffect(() => {
     if (!liveSession || liveSession.status !== 'far') return
     if (!liveSession.trailStart || !navigator?.geolocation) return
 
     const trailStart = liveSession.trailStart
-
     const id = setInterval(() => {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const userPos: [number, number] = [pos.coords.longitude, pos.coords.latitude]
-          const dist = haversineKm(userPos, trailStart)
-          if (dist <= 0.2) {
-            setLiveStatus('tracking', { trailStart })
-          }
+          const dist = haversineKm([pos.coords.longitude, pos.coords.latitude], trailStart)
+          if (dist <= 0.2) setLiveStatus('tracking', { trailStart })
         },
         () => {},
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 3000 }
@@ -260,7 +266,7 @@ export default function TrailPanel() {
     return () => clearInterval(id)
   }, [liveSession?.status])
 
-  // ── Render guard ──────────────────────────────────────────────────
+  // ── Render guard ─────────────────────────────────────────────────
   if (activePanel !== 'trail' || !selectedTrail) return null
 
   const trail      = selectedTrail
@@ -269,7 +275,7 @@ export default function TrailPanel() {
   const isTracking = mySession?.status === 'tracking'
   const isLocating = mySession?.status === 'locating'
   const isFar      = mySession?.status === 'far'
-  const isLive     = !!mySession  // any live state for THIS trail
+  const isLive     = !!mySession
 
   const hasElev  = elevPts.length >= 2
   const minElev  = hasElev ? Math.min(...elevPts.map(p => p.elev)) : 0
@@ -285,43 +291,97 @@ export default function TrailPanel() {
   const scrubFrac = isTracking && mySession ? progressFrac(elevPts, mySession.distKm) : null
   const scrubX    = scrubFrac != null ? scrubFrac * SVG_W : null
 
-  // Header background tint
   const headerBg = isTracking ? 'bg-sky-950/40'
     : isFar      ? 'bg-amber-950/30'
     : isLocating  ? 'bg-forest-800/60'
     : ''
 
+  // ── Close / minimise handler ─────────────────────────────────────
+  function handleClose() {
+    if (isLive) stopLive()
+    setPanel(null)
+  }
+
+  // ── Swipe handlers on the drag handle ────────────────────────────
+  function onHandleTouchStart(e: React.TouchEvent) {
+    touchStartY.current = e.touches[0].clientY
+  }
+
+  function onHandleTouchEnd(e: React.TouchEvent) {
+    const diff = touchStartY.current - e.changedTouches[0].clientY
+    if (diff > 40) {
+      // swiped up → expand
+      setCollapsed(false)
+    } else if (diff < -40) {
+      // swiped down → collapse, or close if already collapsed
+      if (!collapsed) {
+        setCollapsed(true)
+      } else {
+        handleClose()
+      }
+    }
+  }
+
+  // Mobile panel height
+  const mobileHeight = collapsed ? '44vh' : '88vh'
+
   return (
     <AnimatePresence>
       <>
-        {/* Mobile backdrop */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-40 sm:hidden bg-black/40"
-          onClick={() => { if (!isLive) setPanel(null) }}
-        />
+        {/*
+          NO full-screen backdrop on mobile.
+          Map is visible in the top portion of the screen.
+          Backdrop only shown on desktop as a subtle overlay when needed.
+        */}
 
-        {/* Panel */}
+        {/* Panel — bottom sheet on mobile, right sidebar on desktop */}
         <motion.div
           initial={{ y: '100%', opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: '100%', opacity: 0 }}
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-          className="fixed bottom-0 inset-x-0 z-50 sm:bottom-auto sm:top-20 sm:right-4 sm:left-auto sm:w-80 max-h-[88vh] sm:max-h-[calc(100vh-96px)] overflow-y-auto overflow-x-hidden scrollbar-hide"
+          className="fixed bottom-0 inset-x-0 z-50 sm:bottom-auto sm:top-20 sm:right-4 sm:left-auto sm:w-80"
         >
-          <div className="glass panel-shadow rounded-t-3xl sm:rounded-2xl overflow-hidden">
+          {/*
+            Glass panel container.
+            Mobile: fixed height (44vh collapsed / 88vh expanded), overflow-hidden to clip content.
+            Desktop: auto height, max-height constrained, scrollable.
+          */}
+          <motion.div
+            className="glass panel-shadow rounded-t-3xl sm:rounded-2xl flex flex-col sm:overflow-y-auto sm:scrollbar-hide"
+            animate={isMobile ? { height: mobileHeight } : { height: 'auto' }}
+            transition={{ type: 'spring', stiffness: 300, damping: 32 }}
+            style={{
+              overflow: isMobile ? (collapsed ? 'hidden' : 'auto') : undefined,
+              maxHeight: !isMobile ? 'calc(100vh - 96px)' : undefined,
+            }}
+          >
 
-            {/* Mobile drag handle */}
-            <div className="flex justify-center pt-3 pb-1 sm:hidden">
-              <div className="w-10 h-1 rounded-full bg-white/20" />
+            {/*
+              ── DRAG HANDLE ─────────────────────────────────────────
+              Tap to toggle collapsed/expanded.
+              Swipe up to expand. Swipe down to collapse or close.
+              Only shown on mobile.
+            */}
+            <div
+              className="sm:hidden flex-shrink-0"
+              onTouchStart={onHandleTouchStart}
+              onTouchEnd={onHandleTouchEnd}
+              onClick={() => setCollapsed(c => !c)}
+            >
+              <div className="flex flex-col items-center pt-3 pb-2 cursor-pointer">
+                <div className="w-12 h-1.5 rounded-full bg-white/25 mb-1" />
+                <span className="text-[9px] font-semibold tracking-widest uppercase text-white/20">
+                  {collapsed ? 'Swipe up for details' : 'Swipe down to minimise'}
+                </span>
+              </div>
             </div>
 
-            {/* ── Header ──────────────────────────────────────────── */}
-            <div className={`px-5 pt-4 pb-4 border-b border-white/5 transition-colors duration-500 ${headerBg}`}>
+            {/* ── HEADER ──────────────────────────────────────────── */}
+            <div className={`px-5 pt-3 pb-4 border-b border-white/5 flex-shrink-0 transition-colors duration-500 ${headerBg}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
+                  {/* Status badge row */}
                   <div className="flex items-center gap-2 mb-1.5">
                     {isTracking ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider animate-pulse"
@@ -348,64 +408,68 @@ export default function TrailPanel() {
                       {trail.difficulty}
                     </span>
                   </div>
-                  <h3 className="text-[17px] font-bold text-white leading-snug">{trail.name}</h3>
+
+                  {/* Trail name */}
+                  <h3 className="text-[18px] font-bold text-white leading-snug">{trail.name}</h3>
+
+                  {/* Stats */}
                   <div className="flex items-center gap-4 mt-1.5">
-                    <span className="flex items-center gap-1 text-[11px] text-nature-muted">
-                      <Ruler size={10} />{trail.distance}
+                    <span className="flex items-center gap-1 text-[12px] text-nature-muted">
+                      <Ruler size={11} />{trail.distance}
                     </span>
                     {trail.duration && (
-                      <span className="flex items-center gap-1 text-[11px] text-nature-muted">
-                        <Clock size={10} />{trail.duration}
+                      <span className="flex items-center gap-1 text-[12px] text-nature-muted">
+                        <Clock size={11} />{trail.duration}
                       </span>
                     )}
                   </div>
                 </div>
-                {!isLive && (
-                  <button onClick={() => setPanel(null)}
-                    className="p-2 hover:bg-white/10 rounded-xl transition-colors text-nature-muted flex-shrink-0"
-                    aria-label="Close">
-                    <X size={16} />
-                  </button>
-                )}
+
+                {/* X close button — ALWAYS visible */}
+                <button
+                  onClick={handleClose}
+                  className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/10 active:bg-white/15 transition-colors text-nature-muted flex-shrink-0"
+                  aria-label={isLive ? 'Stop and close' : 'Close'}
+                >
+                  <X size={18} />
+                </button>
               </div>
             </div>
 
-            {/* ── LOCATING — one-shot GPS check in progress ────────── */}
+            {/* ── GPS state banners (always visible, flex-shrink-0) ── */}
+
+            {/* LOCATING */}
             <AnimatePresence>
               {isLocating && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
+                  className="overflow-hidden flex-shrink-0"
                 >
                   <div className="px-5 py-4 border-b border-white/5 flex items-center gap-3"
                     style={{ background: 'rgba(15,23,42,0.6)' }}>
                     <Loader2 size={18} className="animate-spin text-slate-400 flex-shrink-0" />
                     <div>
                       <div className="text-[12px] font-semibold text-white">Checking your location…</div>
-                      <div className="text-[10px] text-nature-muted mt-0.5">
-                        Comparing GPS to trail start point
-                      </div>
+                      <div className="text-[10px] text-nature-muted mt-0.5">Comparing GPS to trail start point</div>
                     </div>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* ── FAR FROM TRAIL — navigate-to-start banner ────────── */}
+            {/* FAR FROM TRAIL */}
             <AnimatePresence>
               {isFar && mySession && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
+                  className="overflow-hidden flex-shrink-0"
                 >
                   <div className="px-5 py-4 border-b border-white/5"
                     style={{ background: 'rgba(45,26,6,0.7)' }}>
-
-                    {/* Distance badge */}
                     <div className="flex items-center gap-2 mb-2">
                       <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
                         style={{ background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.3)' }}>
@@ -417,31 +481,19 @@ export default function TrailPanel() {
                             ? `${Math.round(mySession.distToStartKm * 1000)} m`
                             : `${mySession.distToStartKm.toFixed(1)} km`} from trail start
                         </div>
-                        <div className="text-[10px] text-nature-muted">
-                          Auto-tracking starts within 200 m
-                        </div>
+                        <div className="text-[10px] text-nature-muted">Auto-tracking starts within 200 m</div>
                       </div>
                     </div>
-
-                    {/* Map hint */}
                     <div className="rounded-lg px-3 py-2 text-[11px] leading-relaxed"
                       style={{ background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.15)' }}>
                       <span style={{ color: '#fbbf24' }}>●</span>
                       <span className="text-nature-muted ml-1.5">
-                        Green marker on the map shows the trail start.
-                        GPS checks every 5 s — tracking begins automatically when you arrive.
+                        Green marker on map shows trail start. GPS checks every 5 s.
                       </span>
                     </div>
-
-                    {/* Cancel button */}
-                    <button
-                      onClick={() => stopLive()}
+                    <button onClick={() => stopLive()}
                       className="mt-3 w-full py-2 rounded-xl text-[11px] font-semibold transition-all"
-                      style={{
-                        background: 'rgba(255,255,255,0.04)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        color: '#94a3b8',
-                      }}>
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8' }}>
                       Cancel
                     </button>
                   </div>
@@ -449,26 +501,22 @@ export default function TrailPanel() {
               )}
             </AnimatePresence>
 
-            {/* ── TRACKING — live stats HUD ──────────────────────────── */}
+            {/* TRACKING HUD */}
             <AnimatePresence>
               {isTracking && mySession && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
+                  className="overflow-hidden flex-shrink-0"
                 >
                   <div className="px-5 py-4 border-b border-white/5"
                     style={{ background: 'rgba(8,47,73,0.6)' }}>
                     <div className="grid grid-cols-4 gap-2">
-                      <StatCell icon={<Timer size={9} />} label="TIME"  color="#38bdf8"
-                        value={fmtTime(mySession.elapsedSecs)} mono />
-                      <StatCell icon={<Footprints size={9} />} label="DIST" color="#38bdf8"
-                        value={mySession.distKm.toFixed(2)} unit="km" mono />
-                      <StatCell icon={<Clock size={9} />} label="PACE" color="#38bdf8"
-                        value={mySession.paceMinKm} unit="/km" mono />
-                      <StatCell icon={<Gauge size={9} />} label="SPD"  color="#38bdf8"
-                        value={mySession.speedKmh.toFixed(1)} unit="km/h" mono />
+                      <StatCell icon={<Timer size={9} />}       label="TIME" color="#38bdf8" value={fmtTime(mySession.elapsedSecs)} mono />
+                      <StatCell icon={<Footprints size={9} />}  label="DIST" color="#38bdf8" value={mySession.distKm.toFixed(2)} unit="km" mono />
+                      <StatCell icon={<Clock size={9} />}       label="PACE" color="#38bdf8" value={mySession.paceMinKm} unit="/km" mono />
+                      <StatCell icon={<Gauge size={9} />}       label="SPD"  color="#38bdf8" value={mySession.speedKmh.toFixed(1)} unit="km/h" mono />
                     </div>
                     <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px]"
                       style={{ color: 'rgba(56,189,248,0.55)' }}>
@@ -482,7 +530,97 @@ export default function TrailPanel() {
               )}
             </AnimatePresence>
 
-            {/* ── Elevation Profile ────────────────────────────────── */}
+            {/* ── ACTION BUTTONS (always visible — core of collapsed view) ── */}
+            <div className="px-5 py-4 flex-shrink-0 border-b border-white/5">
+              {isTracking ? (
+                <button onClick={() => { stopLive(); setShowStartModal(false) }}
+                  className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-[15px] transition-all active:scale-[0.98]"
+                  style={{ background: 'rgba(239,68,68,0.12)', border: '1.5px solid rgba(239,68,68,0.35)', color: '#f87171' }}>
+                  <Square size={16} fill="currentColor" />
+                  Stop Session
+                </button>
+
+              ) : isLocating || isFar ? (
+                <button disabled
+                  className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-[15px] opacity-40 cursor-not-allowed"
+                  style={{ background: 'rgba(56,189,248,0.08)', border: '1.5px solid rgba(56,189,248,0.2)', color: '#38bdf8' }}>
+                  <Loader2 size={16} className="animate-spin" />
+                  {isLocating ? 'Locating…' : 'Waiting for arrival…'}
+                </button>
+
+              ) : showStartModal ? (
+                <div className="rounded-2xl overflow-hidden border"
+                  style={{ borderColor: 'rgba(56,189,248,0.25)', background: 'rgba(8,47,73,0.55)' }}>
+                  <div className="px-4 pt-4 pb-3 border-b border-white/5">
+                    <p className="text-[13px] font-semibold text-white text-center">Where do you want to start?</p>
+                  </div>
+
+                  {/* Trail start */}
+                  <button
+                    onClick={() => {
+                      setShowStartModal(false)
+                      const start = trailCoords?.[0] as [number, number] | undefined
+                      if (start && trailKey) startLiveAtStart(trailKey, start)
+                    }}
+                    disabled={!trailCoords || !trailKey}
+                    className="w-full flex items-center gap-4 px-5 py-4 text-left transition-all hover:bg-white/5 active:bg-white/8 disabled:opacity-40 border-b border-white/5"
+                  >
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)' }}>
+                      <Flag size={18} style={{ color: '#22c55e' }} />
+                    </div>
+                    <div>
+                      <div className="text-[13px] font-bold text-white">Start from trail start</div>
+                      <div className="text-[11px] text-nature-muted mt-0.5">No GPS needed · begins immediately</div>
+                    </div>
+                  </button>
+
+                  {/* GPS location */}
+                  <button
+                    onClick={() => { setShowStartModal(false); if (trailKey) startLive(trailKey) }}
+                    disabled={!trailKey}
+                    className="w-full flex items-center gap-4 px-5 py-4 text-left transition-all hover:bg-white/5 active:bg-white/8 disabled:opacity-40"
+                  >
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(56,189,248,0.15)', border: '1px solid rgba(56,189,248,0.3)' }}>
+                      <LocateFixed size={18} style={{ color: '#38bdf8' }} />
+                    </div>
+                    <div>
+                      <div className="text-[13px] font-bold text-white">Use my GPS location</div>
+                      <div className="text-[11px] text-nature-muted mt-0.5">Track from where you are now</div>
+                    </div>
+                  </button>
+
+                  <div className="px-4 py-3 border-t border-white/5">
+                    <button onClick={() => setShowStartModal(false)}
+                      className="w-full py-2.5 rounded-xl text-[12px] font-semibold text-nature-muted transition-all hover:text-white hover:bg-white/5 active:bg-white/8">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+
+              ) : (
+                <button
+                  onClick={() => setShowStartModal(true)}
+                  disabled={!trailKey}
+                  className="w-full flex items-center justify-center gap-2.5 py-4 rounded-2xl font-bold text-[15px] transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(56,189,248,0.18), rgba(56,189,248,0.06))',
+                    border: '1.5px solid rgba(56,189,248,0.4)',
+                    color: '#38bdf8',
+                  }}>
+                  <Radio size={16} />
+                  Go Live
+                </button>
+              )}
+            </div>
+
+            {/* ── EXPANDED CONTENT ─────────────────────────────────────────
+                On mobile: hidden when collapsed (clipped by overflow:hidden + 44vh)
+                On desktop: always visible
+            ─────────────────────────────────────────────────────────────── */}
+
+            {/* Elevation Profile */}
             <div className="px-5 py-4 border-b border-white/5">
               <div className="flex items-center justify-between mb-2.5">
                 <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-nature-muted">
@@ -525,21 +663,13 @@ export default function TrailPanel() {
                           </clipPath>
                         )}
                       </defs>
-
-                      {/* Base fill */}
                       <path d={`${elevPath} L ${SVG_W},${SVG_H} L 0,${SVG_H} Z`} fill="url(#elev-fill)" />
-
-                      {/* Completed section — blue overlay */}
                       {scrubX != null && (
                         <path d={`${elevPath} L ${SVG_W},${SVG_H} L 0,${SVG_H} Z`}
                           fill="url(#elev-done)" clipPath="url(#done-clip)" />
                       )}
-
-                      {/* Elevation line */}
                       <path d={elevPath} fill="none" stroke="#7ec850"
                         strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
-
-                      {/* Live scrubber */}
                       {scrubX != null && (
                         <>
                           <line x1={scrubX} y1={0} x2={scrubX} y2={SVG_H}
@@ -549,18 +679,13 @@ export default function TrailPanel() {
                         </>
                       )}
                     </svg>
-
-                    {/* Stats row */}
                     <div className="absolute bottom-0 inset-x-0 flex items-end justify-between px-3 pb-2">
                       <div className="flex gap-4">
-                        <ElevStat label="LOW"  icon={<ChevronDown size={9} className="text-sky-400" />}
-                          value={`${Math.round(minElev)}m`} />
-                        <ElevStat label="HIGH" icon={<ChevronUp size={9} className="text-orange-400" />}
-                          value={`${Math.round(maxElev)}m`} />
+                        <ElevStat label="LOW"  icon={<ChevronDown size={9} className="text-sky-400" />}   value={`${Math.round(minElev)}m`} />
+                        <ElevStat label="HIGH" icon={<ChevronUp   size={9} className="text-orange-400" />} value={`${Math.round(maxElev)}m`} />
                         <ElevStat label="GAIN" value={`+${Math.round(elevGain)}m`} green />
                         {isTracking && mySession && totalKm > 0 && (
-                          <ElevStat label="DONE"
-                            value={`${Math.round((mySession.distKm / totalKm) * 100)}%`}
+                          <ElevStat label="DONE" value={`${Math.round((mySession.distKm / totalKm) * 100)}%`}
                             style={{ color: '#38bdf8' }} />
                         )}
                       </div>
@@ -571,147 +696,34 @@ export default function TrailPanel() {
               </div>
             </div>
 
-            {/* ── Species sections ─────────────────────────────────── */}
+            {/* Species sections */}
             <div className="px-5 py-4 space-y-5">
-
               <SpeciesSection emoji="🐦" label="Birds"  accentColor="#4cde8f"
                 icon={<Bird size={12} />} items={birds}  loading={loadingSpec}
                 emptyMsg="No bird records matched near this trail"
                 onSelect={setSelectedFeature} />
-
               <div className="h-px bg-white/5" />
-
               <SpeciesSection emoji="🌿" label="Plants" accentColor="#22d3ee"
                 icon={<Leaf size={12} />} items={plants} loading={loadingSpec}
                 emptyMsg="No plant records matched near this trail"
                 onSelect={setSelectedFeature} />
-
               <div className="h-px bg-white/5" />
-
               <SpeciesSection emoji="🍄" label="Fungi"  accentColor="#c084fc"
                 icon={<span style={{ fontSize: 12 }}>🍄</span>} items={fungi} loading={loadingSpec}
                 emptyMsg="No fungi records matched near this trail"
                 onSelect={setSelectedFeature} />
 
-              {/* Trail note */}
               {trail.note && (
                 <div className="p-3 rounded-xl border text-[11px] italic leading-relaxed text-nature-text/80"
                   style={{ background: 'rgba(255,140,66,0.05)', borderColor: 'rgba(255,140,66,0.2)' }}>
                   {trail.note}
                 </div>
               )}
-
-              {/* ── Go Live / Stop button ──────────────────────────── */}
-              {isTracking ? (
-                /* ── Stop session ── */
-                <button onClick={() => { stopLive(); setShowStartModal(false) }}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm transition-all"
-                  style={{
-                    background: 'rgba(239,68,68,0.12)',
-                    border: '1px solid rgba(239,68,68,0.35)',
-                    color: '#f87171',
-                  }}>
-                  <Square size={14} fill="currentColor" />
-                  Stop Session
-                </button>
-
-              ) : isLocating || isFar ? (
-                /* ── In-progress — disabled ── */
-                <button disabled
-                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm opacity-40 cursor-not-allowed"
-                  style={{
-                    background: 'rgba(56,189,248,0.08)',
-                    border: '1px solid rgba(56,189,248,0.2)',
-                    color: '#38bdf8',
-                  }}>
-                  <Loader2 size={14} className="animate-spin" />
-                  {isLocating ? 'Locating…' : 'Waiting for arrival…'}
-                </button>
-
-              ) : showStartModal ? (
-                /* ── Start choice modal ── */
-                <div className="rounded-xl overflow-hidden border"
-                  style={{ borderColor: 'rgba(56,189,248,0.25)', background: 'rgba(8,47,73,0.55)' }}>
-
-                  <div className="px-4 pt-4 pb-3 border-b border-white/5">
-                    <p className="text-[12px] font-semibold text-white text-center">
-                      Where do you want to start?
-                    </p>
-                  </div>
-
-                  {/* Option A — Trail start point */}
-                  <button
-                    onClick={() => {
-                      setShowStartModal(false)
-                      const start = trailCoords?.[0] as [number, number] | undefined
-                      if (start && trailKey) startLiveAtStart(trailKey, start)
-                    }}
-                    disabled={!trailCoords || !trailKey}
-                    className="w-full flex items-start gap-3 px-4 py-3.5 text-left transition-all hover:bg-white/5 disabled:opacity-40 border-b border-white/5"
-                  >
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
-                      style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)' }}>
-                      <Flag size={14} style={{ color: '#22c55e' }} />
-                    </div>
-                    <div>
-                      <div className="text-[12px] font-bold text-white">Trail Start Point</div>
-                      <div className="text-[10px] text-nature-muted mt-0.5 leading-relaxed">
-                        Map flies to the beginning of the trail. No GPS needed. Tracking begins immediately.
-                      </div>
-                    </div>
-                  </button>
-
-                  {/* Option B — Current location */}
-                  <button
-                    onClick={() => {
-                      setShowStartModal(false)
-                      if (trailKey) startLive(trailKey)
-                    }}
-                    disabled={!trailKey}
-                    className="w-full flex items-start gap-3 px-4 py-3.5 text-left transition-all hover:bg-white/5 disabled:opacity-40"
-                  >
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
-                      style={{ background: 'rgba(56,189,248,0.15)', border: '1px solid rgba(56,189,248,0.3)' }}>
-                      <LocateFixed size={14} style={{ color: '#38bdf8' }} />
-                    </div>
-                    <div>
-                      <div className="text-[12px] font-bold text-white">My Current Location</div>
-                      <div className="text-[10px] text-nature-muted mt-0.5 leading-relaxed">
-                        Uses GPS to track from where you are now. Falls back to trail start if GPS is denied.
-                      </div>
-                    </div>
-                  </button>
-
-                  {/* Cancel */}
-                  <div className="px-4 py-3 border-t border-white/5">
-                    <button
-                      onClick={() => setShowStartModal(false)}
-                      className="w-full py-2 rounded-lg text-[11px] font-semibold text-nature-muted transition-all hover:text-white hover:bg-white/5">
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-
-              ) : (
-                /* ── Go Live — idle ── */
-                <button
-                  onClick={() => setShowStartModal(true)}
-                  disabled={!trailKey}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(56,189,248,0.18), rgba(56,189,248,0.06))',
-                    border: '1px solid rgba(56,189,248,0.4)',
-                    color: '#38bdf8',
-                  }}>
-                  <Radio size={15} />
-                  Go Live
-                </button>
-              )}
             </div>
 
             {/* iOS safe-area spacer */}
-            <div className="h-2 sm:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }} />
-          </div>
+            <div className="h-2 sm:hidden flex-shrink-0" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }} />
+          </motion.div>
         </motion.div>
       </>
     </AnimatePresence>
@@ -742,9 +754,7 @@ function ElevStat({ label, icon, value, green, style: extraStyle }: {
 }) {
   return (
     <div>
-      <div className="flex items-center gap-0.5 text-[9px] text-nature-muted mb-0.5">
-        {icon}{label}
-      </div>
+      <div className="flex items-center gap-0.5 text-[9px] text-nature-muted mb-0.5">{icon}{label}</div>
       <div className="text-[12px] font-bold leading-none"
         style={extraStyle ?? (green ? { color: '#7ec850' } : { color: '#fff' })}>
         {value}
@@ -763,9 +773,7 @@ function SpeciesSection({ emoji, label, accentColor, icon, items, loading, empty
       <div className="flex items-center justify-between mb-2.5">
         <div className="flex items-center gap-2">
           <span className="text-sm leading-none">{emoji}</span>
-          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-nature-muted">
-            {label}
-          </span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-nature-muted">{label}</span>
         </div>
         {!loading && items.length > 0 && (
           <span className="text-[10px] text-nature-muted">{items.length}+ species</span>
