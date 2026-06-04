@@ -1,0 +1,2 @@
+components/ui/InfoPanel.tsx(57,15): error TS2322: Type 'unknown' is not assignable to type 'ReactNode'.
+components/ui/InfoPanel.tsx(68,19): error TS2322: Type 'unknown' is not assignable to type 'ReactNode'.
